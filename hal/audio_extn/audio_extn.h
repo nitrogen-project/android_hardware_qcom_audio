@@ -79,6 +79,11 @@
                                       AUDIO_FORMAT_AAC_SUB_HE_V2)
 #endif
 
+#ifndef AUDIO_EXTN_POLICY_ENABLED
+#define AUDIO_OUTPUT_FLAG_VOIP_RX 0x800
+#define AUDIO_OUTPUT_FLAG_DIRECT_PCM 0x2000
+#endif
+
 #ifndef COMPRESS_METADATA_NEEDED
 #define audio_extn_parse_compress_metadata(out, parms) (0)
 #else

@@ -2265,7 +2265,7 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
             out->send_new_metadata = 0;
             if (out->send_next_track_params && out->is_compr_metadata_avail) {
                 ALOGD("copl(%p):send next track params in gapless", out);
-                compress_set_next_track_param(out->compr, &(out->compr_config.codec->options));
+                //compress_set_next_track_param(out->compr, &(out->compr_config.codec->options));
                 out->send_next_track_params = false;
                 out->is_compr_metadata_avail = false;
             }
