@@ -47,6 +47,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
 #include <stdlib.h>
 #include <math.h>
@@ -71,6 +72,7 @@
 #include "voice_extn.h"
 
 #include "sound/compress_params.h"
+#include "sound/compress_offload.h"
 #include "sound/asound.h"
 
 #define COMPRESS_OFFLOAD_NUM_FRAGMENTS 4
@@ -254,6 +256,17 @@ static struct audio_device *adev = NULL;
 static pthread_mutex_t adev_init_lock;
 static unsigned int audio_device_ref_count;
 
+
+static int compress_set_next_track_param(struct compress *compress,
+	union snd_codec_options *codec_options)
+{
+	if (!is_compress_running(compress))
+		return -1;
+
+	if (ioctl(*((int *)compress), SNDRV_COMPRESS_SET_NEXT_TRACK_PARAM, codec_options))
+		return -1;
+	return 0;
+}
 
 static int check_and_set_gapless_mode(struct audio_device *adev, bool enable_gapless)
 {
@@ -2265,7 +2278,7 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
             out->send_new_metadata = 0;
             if (out->send_next_track_params && out->is_compr_metadata_avail) {
                 ALOGD("copl(%p):send next track params in gapless", out);
-                //compress_set_next_track_param(out->compr, &(out->compr_config.codec->options));
+                compress_set_next_track_param(out->compr, &(out->compr_config.codec->options));
                 out->send_next_track_params = false;
                 out->is_compr_metadata_avail = false;
             }
