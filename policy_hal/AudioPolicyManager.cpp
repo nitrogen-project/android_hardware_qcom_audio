@@ -1354,6 +1354,7 @@ audio_io_handle_t AudioPolicyManagerCustom::getOutput(audio_stream_type_t stream
                               flags, offloadInfo);
 }
 
+#ifdef AUDIO_EXTN_POLICY_ENABLED
 bool static tryForDirectPCM(int bitWidth, audio_output_flags_t *flags, uint32_t samplingRate)
 {
     bool playerDirectPCM = false; // Output request for Track created by mediaplayer
@@ -1390,6 +1391,45 @@ bool static tryForDirectPCM(int bitWidth, audio_output_flags_t *flags, uint32_t 
 
     return (!offloadDisabled && (trackDirectPCM || playerDirectPCM));
 }
+#else
+bool static tryForDirectPCM(int bitWidth, const audio_attributes_t *attr, audio_stream_type_t stream, 
+                            audio_output_flags_t flags, uint32_t samplingRate)
+{
+    bool playerDirectPCM = false; // Output request for Track created by mediaplayer
+    bool trackDirectPCM = false;  // Output request for track created by other apps
+    bool offloadDisabled = property_get_bool("audio.offload.disable", false);
+
+    // Direct PCM is allowed only if
+    // In case of mediaPlayer playback
+    // 16 bit direct pcm or 24bit direct PCM property is set and
+    // the FLAG requested is DIRECT_PCM ( NuPlayer case) or
+    // In case of AudioTracks created by apps
+    // track offload is enabled and FLAG requested is FLAG_NONE.
+
+    if (offloadDisabled) {
+        ALOGI("offload disabled by audio.offload.disable=%d", offloadDisabled);
+    }
+
+    if (flags & (AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_DIRECT_PCM)) {
+       if (bitWidth == 24 || bitWidth == 32)
+           playerDirectPCM =
+                property_get_bool("audio.offload.pcm.24bit.enable", false);
+       else
+           playerDirectPCM =
+                property_get_bool("audio.offload.pcm.16bit.enable", false);
+    } else if ((flags == AUDIO_OUTPUT_FLAG_NONE) &&
+               (samplingRate % SAMPLE_RATE_8000 == 0) &&
+               (stream == AUDIO_STREAM_MUSIC) &&
+               ((attr == NULL) || (attr->usage == AUDIO_USAGE_MEDIA) || (attr->usage == AUDIO_USAGE_GAME))) {
+        trackDirectPCM = property_get_bool("audio.offload.track.enable", true);
+    }
+
+    ALOGI("Direct PCM %s for this request",
+       (!offloadDisabled && (trackDirectPCM || playerDirectPCM))?"can be enabled":"is disabled");
+
+    return (!offloadDisabled && (trackDirectPCM || playerDirectPCM));
+}
+#endif
 
 status_t AudioPolicyManagerCustom::getOutputForAttr(const audio_attributes_t *attr,
                                               audio_io_handle_t *output,
@@ -1403,12 +1443,11 @@ status_t AudioPolicyManagerCustom::getOutputForAttr(const audio_attributes_t *at
                                               audio_port_handle_t selectedDeviceId,
                                               const audio_offload_info_t *offloadInfo)
 {
-#ifdef AUDIO_EXTN_POLICY_ENABLED
     audio_offload_info_t tOffloadInfo = AUDIO_INFO_INITIALIZER;
 
     uint32_t bitWidth = (audio_bytes_per_sample(format) * 8);
 
-
+#ifdef AUDIO_EXTN_POLICY_ENABLED
     if (tryForDirectPCM(bitWidth, &flags, samplingRate) &&
         (offloadInfo == NULL)) {
 
@@ -1424,6 +1463,17 @@ status_t AudioPolicyManagerCustom::getOutputForAttr(const audio_attributes_t *at
             ALOGD("%s:: attribute is NULL .. no usage set", __func__);
         }
         offloadInfo = &tOffloadInfo;
+    }
+#else
+    if (audio_is_linear_pcm(format) && tryForDirectPCM(bitWidth, attr, *stream, flags, samplingRate)) {
+        if (offloadInfo == NULL) {
+            tOffloadInfo.sample_rate  = samplingRate;
+            tOffloadInfo.channel_mask = channelMask;
+            tOffloadInfo.format = format;
+            tOffloadInfo.stream_type = *stream;
+            offloadInfo = &tOffloadInfo;
+        }
+        flags = (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_DIRECT_PCM);
     }
 #endif //AUDIO_EXTN_POLICY_ENABLED
 
@@ -1681,6 +1731,7 @@ audio_io_handle_t AudioPolicyManagerCustom::getOutputForDevice(
         flags = AUDIO_OUTPUT_FLAG_TTS;
     }
 
+#ifdef AUDIO_EXTN_POLICY_ENABLED
     // check if direct output for track offload already exits
     bool is_track_offload_active = false;
     for (size_t i = 0; i < mOutputs.size(); i++) {
@@ -1692,7 +1743,6 @@ audio_io_handle_t AudioPolicyManagerCustom::getOutputForDevice(
         }
     }
 
-#ifdef AUDIO_EXTN_POLICY_ENABLED
     // Do offload magic here
     if ((flags == AUDIO_OUTPUT_FLAG_NONE) &&
         (stream == AUDIO_STREAM_MUSIC) &&
