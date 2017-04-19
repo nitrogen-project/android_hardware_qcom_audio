@@ -3122,6 +3122,11 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
                 audio_channel_count_from_out_mask(config->channel_mask);
         out->compr_config.codec->ch_out = out->compr_config.codec->ch_in;
         out->bit_width = AUDIO_OUTPUT_BIT_WIDTH;
+#ifndef AUDIO_EXTN_POLICY_ENABLED
+        if (out->flags & AUDIO_OUTPUT_FLAG_DIRECT_PCM) {
+             out->bit_width = audio_bytes_per_sample(config->offload_info.format) * 8;
+        }
+#endif
         /*TODO: Do we need to change it for passthrough */
         out->compr_config.codec->format = SND_AUDIOSTREAMFORMAT_RAW;
 
