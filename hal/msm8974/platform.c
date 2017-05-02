@@ -1539,6 +1539,7 @@ void platform_deinit(void *platform)
         my_data->edid_info = NULL;
     }
 
+    mixer_close(my_data->adev->mixer);
     free(platform);
     /* deinit usb */
     audio_extn_usb_deinit();
