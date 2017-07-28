@@ -1752,15 +1752,19 @@ status_t AudioPolicyManagerCustom::getOutputForAttr(const audio_attributes_t *at
         offloadInfo = &tOffloadInfo;
     }
 #else
-    if (audio_is_linear_pcm(format) && tryForDirectPCM(bitWidth, attr, *stream, flags, samplingRate)) {
-        if (offloadInfo == NULL) {
-            tOffloadInfo.sample_rate  = samplingRate;
-            tOffloadInfo.channel_mask = channelMask;
-            tOffloadInfo.format = format;
-            tOffloadInfo.stream_type = *stream;
-            offloadInfo = &tOffloadInfo;
+    if (audio_is_linear_pcm(format)) {
+        if (tryForDirectPCM(bitWidth, attr, *stream, flags, samplingRate)) {
+            if (offloadInfo == NULL) {
+                tOffloadInfo.sample_rate  = samplingRate;
+                tOffloadInfo.channel_mask = channelMask;
+                tOffloadInfo.format = format;
+                tOffloadInfo.stream_type = *stream;
+                offloadInfo = &tOffloadInfo;
+            }
+            flags = (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_DIRECT_PCM);
+        } else {
+            flags = (audio_output_flags_t)(flags & ~(AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_DIRECT_PCM));
         }
-        flags = (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_DIRECT_PCM);
     }
 #endif //AUDIO_EXTN_POLICY_ENABLED
 
