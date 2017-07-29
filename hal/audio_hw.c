@@ -320,6 +320,8 @@ static bool is_supported_format(audio_format_t format)
         format == AUDIO_FORMAT_PCM_24_BIT_PACKED ||
         format == AUDIO_FORMAT_PCM_8_24_BIT ||
         format == AUDIO_FORMAT_PCM_16_BIT ||
+        format == AUDIO_FORMAT_PCM_32_BIT ||
+        format == AUDIO_FORMAT_PCM_FLOAT ||
         format == AUDIO_FORMAT_FLAC ||
         format == AUDIO_FORMAT_ALAC ||
         format == AUDIO_FORMAT_APE ||
@@ -1822,7 +1824,7 @@ static size_t get_input_buffer_size(uint32_t sample_rate,
 static uint64_t get_actual_pcm_frames_rendered(struct stream_out *out)
 {
     uint64_t actual_frames_rendered = 0;
-    size_t kernel_buffer_size = out->compr_config.fragment_size * out->compr_config.fragments;
+    size_t kernel_buffer_size = out->config.period_size * out->compr_config.fragments;
 
     /* This adjustment accounts for buffering after app processor.
      * It is based on estimated DSP latency per use case, rather than exact.
@@ -1868,7 +1870,7 @@ static size_t out_get_buffer_size(const struct audio_stream *stream)
     struct stream_out *out = (struct stream_out *)stream;
 
     if (is_offload_usecase(out->usecase))
-        return out->compr_config.fragment_size;
+        return out->config.period_size;
     else if(out->usecase == USECASE_COMPRESS_VOIP_CALL)
         return voice_extn_compress_voip_out_get_buffer_size(out);
 
@@ -2297,7 +2299,22 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
             }
         }
 
-        ret = compress_write(out->compr, buffer, bytes);
+        if (out->hal_op_format != out->hal_ip_format &&
+            out->convert_buffer != NULL) {
+            memcpy_by_audio_format(out->convert_buffer,
+                                   out->hal_op_format,
+                                   buffer,
+                                   out->hal_ip_format,
+                                   bytes / format_to_bitwidth_table[out->hal_ip_format]);
+            size_t write_bytes = bytes / format_to_bitwidth_table[out->hal_ip_format]
+                                       * format_to_bitwidth_table[out->hal_op_format];
+            ret = compress_write(out->compr, out->convert_buffer, write_bytes);
+            if (ret > 0)
+                ret = ret / format_to_bitwidth_table[out->hal_op_format]
+                          * format_to_bitwidth_table[out->hal_ip_format];
+        } else {
+            ret = compress_write(out->compr, buffer, bytes);
+        }
         if (ret < 0)
             ret = -errno;
         ALOGVV("%s: writing buffer (%d bytes) to compress device returned %d", __func__, bytes, ret);
@@ -3115,32 +3132,59 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
             out->channel_mask = config->channel_mask;
             config->offload_info.channel_mask = config->channel_mask;
         }
+
         format = out->format = config->offload_info.format;
+        out->hal_ip_format = out->hal_op_format = format;
+        if (out->flags & AUDIO_OUTPUT_FLAG_DIRECT_PCM) {
+            if (format == AUDIO_FORMAT_PCM_32_BIT || format == AUDIO_FORMAT_PCM_FLOAT) {
+                format = out->hal_op_format = pcm_format_to_hal(hal_format_to_pcm(format));
+            }
+        }
+        audio_offload_info_t offload_info = config->offload_info;
+        offload_info.format = format;
+
         out->sample_rate = config->offload_info.sample_rate;
 
         out->bit_width = CODEC_BACKEND_DEFAULT_BIT_WIDTH;
 
-        if (audio_extn_is_dolby_format(config->offload_info.format))
+        if (audio_extn_is_dolby_format(offload_info.format))
             out->compr_config.codec->id =
                 audio_extn_dolby_get_snd_codec_id(adev, out,
-                                                  config->offload_info.format);
+                                                  offload_info.format);
         else
             out->compr_config.codec->id =
-                get_snd_codec_id(config->offload_info.format);
+                get_snd_codec_id(offload_info.format);
 
-        if ((config->offload_info.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_PCM) {
+        if ((offload_info.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_PCM) {
             out->compr_config.fragment_size =
-               platform_get_pcm_offload_buffer_size(&config->offload_info);
+               platform_get_pcm_offload_buffer_size(&offload_info);
                out->compr_config.fragments = DIRECT_PCM_NUM_FRAGMENTS;
         } else if (audio_extn_dolby_is_passthrough_stream(out->flags)) {
             out->compr_config.fragment_size =
-               audio_extn_dolby_get_passt_buffer_size(&config->offload_info);
+               audio_extn_dolby_get_passt_buffer_size(&offload_info);
             out->compr_config.fragments = COMPRESS_OFFLOAD_NUM_FRAGMENTS;
         } else {
             out->compr_config.fragment_size =
-               platform_get_compress_offload_buffer_size(&config->offload_info);
+               platform_get_compress_offload_buffer_size(&offload_info);
             out->compr_config.fragments = COMPRESS_OFFLOAD_NUM_FRAGMENTS;
         }
+
+        if (out->hal_ip_format != out->hal_op_format) {
+            out->convert_buffer = calloc(1, out->compr_config.fragment_size);
+            if (out->convert_buffer == NULL){
+                ALOGE("Allocation failed for convert buffer for size %d",
+                       out->compr_config.fragment_size);
+                ret = -ENOMEM;
+                goto error_open;
+            }
+            ALOGD("Convert buffer allocated of size %d", out->compr_config.fragment_size);
+            out->config.period_size = out->compr_config.fragment_size /
+                    format_to_bitwidth_table[out->hal_op_format] *
+                    format_to_bitwidth_table[out->hal_ip_format];
+        } else {
+            out->config.period_size = out->compr_config.fragment_size;
+        }
+
         out->compr_config.codec->sample_rate =
                     config->offload_info.sample_rate;
         out->compr_config.codec->bit_rate =
@@ -3151,24 +3195,24 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
         out->bit_width = AUDIO_OUTPUT_BIT_WIDTH;
 #ifndef AUDIO_EXTN_POLICY_ENABLED
         if (out->flags & AUDIO_OUTPUT_FLAG_DIRECT_PCM) {
-             out->bit_width = audio_bytes_per_sample(config->offload_info.format) * 8;
+             out->bit_width = format_to_bitwidth_table[offload_info.format] << 3;
         }
 #endif
         /*TODO: Do we need to change it for passthrough */
         out->compr_config.codec->format = SND_AUDIOSTREAMFORMAT_RAW;
 
-        if ((config->offload_info.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC)
+        if ((offload_info.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC)
              out->compr_config.codec->format = SND_AUDIOSTREAMFORMAT_RAW;
-        if ((config->offload_info.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC_ADTS)
+        if ((offload_info.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC_ADTS)
             out->compr_config.codec->format = SND_AUDIOSTREAMFORMAT_MP4ADTS;
-        if (config->offload_info.format == AUDIO_FORMAT_PCM_16_BIT)
+        if (offload_info.format == AUDIO_FORMAT_PCM_16_BIT)
             out->compr_config.codec->format = SNDRV_PCM_FORMAT_S16_LE;
-        if (config->offload_info.format == AUDIO_FORMAT_PCM_24_BIT_PACKED)
+        if (offload_info.format == AUDIO_FORMAT_PCM_24_BIT_PACKED)
             out->compr_config.codec->format = SNDRV_PCM_FORMAT_S24_3LE;
-        if (config->offload_info.format == AUDIO_FORMAT_PCM_8_24_BIT)
+        if (offload_info.format == AUDIO_FORMAT_PCM_8_24_BIT)
             out->compr_config.codec->format = SNDRV_PCM_FORMAT_S24_LE;
 
-        if (config->offload_info.format == AUDIO_FORMAT_FLAC)
+        if (offload_info.format == AUDIO_FORMAT_FLAC)
             out->compr_config.codec->options.flac_dec.sample_size = AUDIO_OUTPUT_BIT_WIDTH;
 
         if (flags & AUDIO_OUTPUT_FLAG_NON_BLOCKING)
@@ -3248,9 +3292,9 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
             out->usecase = USECASE_AUDIO_PLAYBACK_PRIMARY;
             out->config = PCM_CONFIG_AUDIO_PLAYBACK_PRIMARY;
         }
-        out->hal_ip_format = format = out->format;
+        out->hal_ip_format = out->format;
         out->config.format = hal_format_to_pcm(out->hal_ip_format);
-        out->hal_op_format = pcm_format_to_hal(out->config.format);
+        out->hal_op_format = format = pcm_format_to_hal(out->config.format);
         out->bit_width = format_to_bitwidth_table[out->hal_op_format] << 3;
         out->config.rate = config->sample_rate;
         out->sample_rate = out->config.rate;
@@ -3262,7 +3306,7 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
             out->convert_buffer = calloc(1, buffer_size);
             if (out->convert_buffer == NULL){
                 ALOGE("Allocation failed for convert buffer for size %d",
-                       out->compr_config.fragment_size);
+                       buffer_size);
                 ret = -ENOMEM;
                 goto error_open;
             }
