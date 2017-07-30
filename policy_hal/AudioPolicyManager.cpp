@@ -1704,11 +1704,19 @@ bool static tryForDirectPCM(int bitWidth, const audio_attributes_t *attr, audio_
        else
            playerDirectPCM =
                 property_get_bool("audio.offload.pcm.16bit.enable", false);
-    } else if ((flags == AUDIO_OUTPUT_FLAG_NONE) &&
-               (samplingRate % SAMPLE_RATE_8000 == 0) &&
-               (stream == AUDIO_STREAM_MUSIC) &&
-               ((attr == NULL) || (attr->usage == AUDIO_USAGE_MEDIA) || (attr->usage == AUDIO_USAGE_GAME))) {
-        trackDirectPCM = property_get_bool("audio.offload.track.enable", true);
+    } else if ((flags == AUDIO_OUTPUT_FLAG_DEEP_BUFFER) ||
+               ((flags == AUDIO_OUTPUT_FLAG_NONE) &&
+                (samplingRate % SAMPLE_RATE_8000 == 0) &&
+                ((attr && ((attr->usage == AUDIO_USAGE_MEDIA) || (attr->usage == AUDIO_USAGE_GAME))) ||
+                 (stream == AUDIO_STREAM_MUSIC)))) {
+        if (property_get_bool("audio.offload.track.enable", true)) {
+            if (bitWidth == 24 || bitWidth == 32)
+                trackDirectPCM =
+                    property_get_bool("audio.offload.pcm.24bit.enable", false);
+            else
+                trackDirectPCM =
+                    property_get_bool("audio.offload.pcm.16bit.enable", false);
+        }
     }
 
     ALOGI("Direct PCM %s for this request",
