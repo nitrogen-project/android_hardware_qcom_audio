@@ -76,12 +76,10 @@ public:
                                           audio_session_t session,
                                           audio_stream_type_t *stream,
                                           uid_t uid,
-                                          uint32_t samplingRate,
-                                          audio_format_t format,
-                                          audio_channel_mask_t channelMask,
+                                          const audio_config_t *config,
                                           audio_output_flags_t flags,
                                           audio_port_handle_t selectedDeviceId,
-                                          const audio_offload_info_t *offloadInfo);
+                                          audio_port_handle_t *portId);
         virtual status_t startOutput(audio_io_handle_t output,
                                      audio_stream_type_t stream,
                                      audio_session_t session);
@@ -92,15 +90,15 @@ public:
                                          audio_io_handle_t *input,
                                          audio_session_t session,
                                          uid_t uid,
-                                         uint32_t samplingRate,
-                                         audio_format_t format,
-                                         audio_channel_mask_t channelMask,
+                                         const audio_config_base_t *config,
                                          audio_input_flags_t flags,
                                          audio_port_handle_t selectedDeviceId,
-                                         input_type_t *inputType);
+                                         input_type_t *inputType,
+                                         audio_port_handle_t *portId);
         // indicates to the audio policy manager that the input starts being used.
         virtual status_t startInput(audio_io_handle_t input,
-                                    audio_session_t session);
+                                    audio_session_t session,
+                                    concurrency_type__mask_t *concurrency);
         // indicates to the audio policy manager that the input stops being used.
         virtual status_t stopInput(audio_io_handle_t input,
                                    audio_session_t session);
@@ -156,6 +154,13 @@ protected:
         //parameter indicates if HDMI plug in/out detected
         bool mHdmiAudioEvent;
 private:
+        // Notify the policy client of any change of device state with AUDIO_IO_HANDLE_NONE,
+        // so that the client interprets it as global to audio hardware interfaces.
+        // It can give a chance to HAL implementer to retrieve dynamic capabilities associated
+        // to this device for example.
+        void broadcastDeviceConnectionState(audio_devices_t device,
+                                            audio_policy_dev_state_t state,
+                                            const String8 &device_address);
         // updates device caching and output for streams that can influence the
         //    routing of notifications
         void handleNotificationRoutingForStream(audio_stream_type_t stream);
