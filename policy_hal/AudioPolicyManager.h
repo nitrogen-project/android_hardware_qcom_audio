@@ -24,26 +24,6 @@
 
 
 namespace android {
-#ifndef AUDIO_EXTN_FORMATS_ENABLED
-#define AUDIO_FORMAT_WMA 0x12000000UL
-#define AUDIO_FORMAT_WMA_PRO 0x13000000UL
-#define AUDIO_FORMAT_FLAC 0x1B000000UL
-#define AUDIO_FORMAT_ALAC 0x1C000000UL
-#define AUDIO_FORMAT_APE 0x1D000000UL
-#endif
-
-#ifndef AAC_ADTS_OFFLOAD_ENABLED
-#define AUDIO_FORMAT_AAC_ADTS 0x1E000000UL
-#endif
-
-#ifndef AUDIO_EXTN_AFE_PROXY_ENABLED
-#define AUDIO_DEVICE_OUT_PROXY 0x1000000
-#endif
-
-#ifndef AUDIO_EXTN_POLICY_ENABLED
-#define AUDIO_OUTPUT_FLAG_VOIP_RX 0x800
-#define AUDIO_OUTPUT_FLAG_DIRECT_PCM 0x2000
-#endif
 
 // ----------------------------------------------------------------------------
 
