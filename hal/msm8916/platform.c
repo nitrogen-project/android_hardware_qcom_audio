@@ -39,30 +39,30 @@
 #include <dirent.h>
 #define SOUND_TRIGGER_DEVICE_HANDSET_MONO_LOW_POWER_ACDB_ID (100)
 #define MAX_MIXER_XML_PATH  100
-#define MIXER_XML_PATH "/system/etc/mixer_paths.xml"
-#define MIXER_XML_PATH_MTP "/system/etc/mixer_paths_mtp.xml"
-#define MIXER_XML_PATH_SBC "/system/etc/mixer_paths_sbc.xml"
-#define MIXER_XML_PATH_MSM8909_PM8916 "/system/etc/mixer_paths_msm8909_pm8916.xml"
-#define MIXER_XML_PATH_QRD_SKUH "/system/etc/mixer_paths_qrd_skuh.xml"
-#define MIXER_XML_PATH_QRD_SKUI "/system/etc/mixer_paths_qrd_skui.xml"
-#define MIXER_XML_PATH_QRD_SKUHF "/system/etc/mixer_paths_qrd_skuhf.xml"
-#define MIXER_XML_PATH_SKUK "/system/etc/mixer_paths_skuk.xml"
-#define MIXER_XML_PATH_SKUA "/system/etc/mixer_paths_skua.xml"
-#define MIXER_XML_PATH_SKUC "/system/etc/mixer_paths_skuc.xml"
-#define MIXER_XML_PATH_SKUE "/system/etc/mixer_paths_skue.xml"
-#define MIXER_XML_PATH_SKUL "/system/etc/mixer_paths_skul.xml"
-#define MIXER_XML_PATH_SKUM "/system/etc/mixer_paths_qrd_skum.xml"
-#define MIXER_XML_PATH_SKUN_CAJON "/system/etc/mixer_paths_qrd_skun_cajon.xml"
-#define MIXER_XML_PATH_AUXPCM "/system/etc/mixer_paths_auxpcm.xml"
-#define MIXER_XML_PATH_AUXPCM "/system/etc/mixer_paths_auxpcm.xml"
-#define MIXER_XML_PATH_I2S "/system/etc/mixer_paths_i2s.xml"
-#define MIXER_XML_PATH_WCD9306 "/system/etc/mixer_paths_wcd9306.xml"
-#define MIXER_XML_PATH_WCD9330 "/system/etc/mixer_paths_wcd9330.xml"
-#define MIXER_XML_PATH_WCD9335 "/system/etc/mixer_paths_wcd9335.xml"
-#define MIXER_XML_PATH_WCD9326 "/system/etc/mixer_paths_wcd9326.xml"
-#define MIXER_XML_PATH_SKUN "/system/etc/mixer_paths_qrd_skun.xml"
-#define PLATFORM_INFO_XML_PATH      "/system/etc/audio_platform_info.xml"
-#define PLATFORM_INFO_XML_PATH_EXTCODEC  "/system/etc/audio_platform_info_extcodec.xml"
+#define MIXER_XML_PATH "mixer_paths.xml"
+#define MIXER_XML_PATH_MTP "mixer_paths_mtp.xml"
+#define MIXER_XML_PATH_SBC "mixer_paths_sbc.xml"
+#define MIXER_XML_PATH_MSM8909_PM8916 "mixer_paths_msm8909_pm8916.xml"
+#define MIXER_XML_PATH_QRD_SKUH "mixer_paths_qrd_skuh.xml"
+#define MIXER_XML_PATH_QRD_SKUI "mixer_paths_qrd_skui.xml"
+#define MIXER_XML_PATH_QRD_SKUHF "mixer_paths_qrd_skuhf.xml"
+#define MIXER_XML_PATH_SKUK "mixer_paths_skuk.xml"
+#define MIXER_XML_PATH_SKUA "mixer_paths_skua.xml"
+#define MIXER_XML_PATH_SKUC "mixer_paths_skuc.xml"
+#define MIXER_XML_PATH_SKUE "mixer_paths_skue.xml"
+#define MIXER_XML_PATH_SKUL "mixer_paths_skul.xml"
+#define MIXER_XML_PATH_SKUM "mixer_paths_qrd_skum.xml"
+#define MIXER_XML_PATH_SKUN_CAJON "mixer_paths_qrd_skun_cajon.xml"
+#define MIXER_XML_PATH_AUXPCM "mixer_paths_auxpcm.xml"
+#define MIXER_XML_PATH_AUXPCM "mixer_paths_auxpcm.xml"
+#define MIXER_XML_PATH_I2S "mixer_paths_i2s.xml"
+#define MIXER_XML_PATH_WCD9306 "mixer_paths_wcd9306.xml"
+#define MIXER_XML_PATH_WCD9330 "mixer_paths_wcd9330.xml"
+#define MIXER_XML_PATH_WCD9335 "mixer_paths_wcd9335.xml"
+#define MIXER_XML_PATH_WCD9326 "mixer_paths_wcd9326.xml"
+#define MIXER_XML_PATH_SKUN "mixer_paths_qrd_skun.xml"
+#define PLATFORM_INFO_XML_PATH      "audio_platform_info.xml"
+#define PLATFORM_INFO_XML_PATH_EXTCODEC  "audio_platform_info_extcodec.xml"
 
 #define LIB_ACDB_LOADER "libacdbloader.so"
 #define AUDIO_DATA_BLOCK_MIXER_CTL "HDMI EDID"
@@ -1489,13 +1489,38 @@ static void get_source_mic_type(struct platform_data * my_data)
      }
 }
 
+// Treblized config files will be located in /odm/etc or /vendor/etc.
+static const char *kConfigLocationList[] =
+        {"/odm/etc", "/vendor/etc", "/system/etc"};
+static const int kConfigLocationListSize =
+        (sizeof(kConfigLocationList) / sizeof(kConfigLocationList[0]));
+
+bool resolveConfigFile(char file_name[MIXER_PATH_MAX_LENGTH]) {
+    char full_config_path[MIXER_PATH_MAX_LENGTH];
+    for (int i = 0; i < kConfigLocationListSize; i++) {
+        snprintf(full_config_path,
+                 MIXER_PATH_MAX_LENGTH,
+                 "%s/%s",
+                 kConfigLocationList[i],
+                 file_name);
+        if (F_OK == access(full_config_path, 0)) {
+            strcpy(file_name, full_config_path);
+            return true;
+        }
+    }
+    return false;
+}
+
 void *platform_init(struct audio_device *adev)
 {
     char value[PROPERTY_VALUE_MAX];
     struct platform_data *my_data = NULL;
     int retry_num = 0, snd_card_num = 0;
     const char *snd_card_name;
-    char mixer_xml_path[MAX_MIXER_XML_PATH],ffspEnable[PROPERTY_VALUE_MAX];
+    char mixer_xml_path[MAX_MIXER_XML_PATH];
+    char mixer_xml_path_auxpcm[MAX_MIXER_XML_PATH];
+    char platform_info_file[MAX_MIXER_XML_PATH];
+    char ffspEnable[PROPERTY_VALUE_MAX];
     const char *mixer_ctl_name = "Set HPX ActiveBe";
     struct mixer_ctl *ctl = NULL;
     int idx;
@@ -1532,10 +1557,20 @@ void *platform_init(struct audio_device *adev)
             ALOGE("%s: Failed to init hardware info", __func__);
         } else {
             query_platform(snd_card_name, mixer_xml_path);
+            if (!resolveConfigFile(mixer_xml_path)) {
+                ALOGE("%s: Failed to find mixer path file %s, aborting.",
+                       __func__, mixer_xml_path);
+                free(my_data);
+                mixer_close(adev->mixer);
+                return NULL;
+            }
             ALOGD("%s: mixer path file is %s", __func__,
                                     mixer_xml_path);
-            if (audio_extn_read_xml(adev, snd_card_num, mixer_xml_path,
-                                    MIXER_XML_PATH_AUXPCM) == -ENOSYS) {
+            strlcpy(mixer_xml_path_auxpcm, MIXER_XML_PATH_AUXPCM,
+                sizeof(MIXER_XML_PATH_AUXPCM));
+            if (!resolveConfigFile(mixer_xml_path_auxpcm) ||
+                audio_extn_read_xml(adev, snd_card_num, mixer_xml_path,
+                                    mixer_xml_path_auxpcm) == -ENOSYS) {
                 adev->audio_route = audio_route_init(snd_card_num,
                                                  mixer_xml_path);
             }
@@ -1720,9 +1755,13 @@ acdb_init_fail:
 
     /* Initialize ACDB and PCM ID's */
     if (is_external_codec)
-        platform_info_init(PLATFORM_INFO_XML_PATH_EXTCODEC);
+        strlcpy(platform_info_file, PLATFORM_INFO_XML_PATH_EXTCODEC,
+            sizeof(PLATFORM_INFO_XML_PATH_EXTCODEC));
     else
-        platform_info_init(PLATFORM_INFO_XML_PATH);
+        strlcpy(platform_info_file, PLATFORM_INFO_XML_PATH,
+            sizeof(PLATFORM_INFO_XML_PATH));
+    if (resolveConfigFile(platform_info_file))
+        platform_info_init(platform_info_file);
 
     /* obtain source mic type from max mic count*/
     get_source_mic_type(my_data);
